@@ -1,0 +1,9 @@
+out/
+__pycache__/
+*.pyc
+
+# A real recall policy never belongs in the repository — it goes in the LT_POLICY secret,
+# and the workflow writes it to policy.json on the runner. Only the *.example.json
+# illustrations are committed, and they are deliberately about something nobody hunts for.
+policy.json
+lt_policy.json
