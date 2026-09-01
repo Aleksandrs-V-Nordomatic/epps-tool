@@ -128,7 +128,7 @@ def main(argv=None):
     p.add_argument("--out", default="work")
     p.add_argument("--limit", type=int, default=None, help="stop after this many, for a trial")
     p.add_argument("--policy", default=None,
-                   help="recall policy: JSON, a path to one, or EIS_POLICY from the "
+                   help="recall policy: JSON, a path to one, or LT_POLICY from the "
                         "environment. Absent means fetch everything.")
     # THE WATCH LIST TRAVELS WITH THE WINDOW, never in a run of its own. Two runs are two
     # draws at one portal for one date, and two answers about what that date contained.

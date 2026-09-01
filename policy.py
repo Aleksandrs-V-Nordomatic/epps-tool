@@ -38,17 +38,29 @@ import os
 # filter without learning what anyone points it at. An absent or unreadable policy means
 # fetch everything, which is the only safe direction for a filter that failed to load:
 # fetching too much costs time, and dropping silently costs a tender.
-POLICY_ENV = "EIS_POLICY"
+POLICY_ENV = "LT_POLICY"
+
+# THE NAME THIS TOOL USED TO READ, checked rather than ignored. The Lithuanian lane was
+# split out of the Latvian repository, where the variable was `EIS_POLICY` and the same
+# gate served both countries. An environment still carrying only the old name would load
+# no policy at all, and no policy means fetch everything -- a whole day drawn from a
+# state portal, reported as success. A rename that fails open is worse than no rename.
+FORMER_POLICY_ENV = "EIS_POLICY"
 
 
 def load_policy(source=None):
     """The caller's recall policy, or None. None means no filter — fetch everything.
 
-    `source` is JSON text, a path to a JSON file, or None to read `EIS_POLICY` from the
+    `source` is JSON text, a path to a JSON file, or None to read `LT_POLICY` from the
     environment. Tests pass a fixture through it; production passes nothing and the
     environment answers, so no deployment's terms are ever committed here.
     """
     raw = source if source is not None else os.environ.get(POLICY_ENV)
+    if source is None and not raw and os.environ.get(FORMER_POLICY_ENV):
+        raise EnvironmentError(
+            "%s is set but this tool reads %s. Rename it: honouring neither would fetch "
+            "the whole day ungated and report success."
+            % (FORMER_POLICY_ENV, POLICY_ENV))
     if not raw or not raw.strip():
         return None
     text = raw
