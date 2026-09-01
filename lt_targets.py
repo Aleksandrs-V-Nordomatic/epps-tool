@@ -60,6 +60,24 @@ _MONTH = {m: i for i, m in enumerate(
     "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), start=1)}
 
 
+# HOW FAR THE PAGER MAY WALK, and why it is not a limit on the answer. This was 60, ten
+# rows to a page, so any window holding more than 600 records came back holding exactly
+# 600 — measured 2026-09-01: a month of publications is 2271 records over 228 pages and
+# returned 600, and the standing doors are 787 and returned 600. Nothing failed, because
+# running out of pages was indistinguishable from running out of rows. The number is a stop
+# for a pager that never ends; the guarantee is below it.
+PAGE_CAP = 400
+
+
+class Truncated(RuntimeError):
+    """The cap was reached while EPPS was still serving new rows.
+
+    Raised rather than returned, and never caught here. A page walk that stops early cannot
+    say what it missed - unlike a target that failed, which the day names in `lost` - so
+    there is nothing honest to deliver and no way for a reader to know the day is short.
+    """
+
+
 def _text(fragment):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", fragment)
                   .replace("&nbsp;", " ").replace("&amp;", "&")
@@ -129,13 +147,17 @@ def parse_rows(html, kind):
 
 
 def targets_from(date_from, date_to, procedure=TENDERS, kind="tender",
-                 max_pages=60, session=None):
+                 max_pages=PAGE_CAP, session=None):
     """Every resource EPPS published in the window, newest first.
 
     The window is inclusive on both sides and is the PUBLICATION date, which is the honest
     question for a nightly run: the portal's "newest" list carries only what is still open,
     so a notice published yesterday and withdrawn today is absent from it. Asked by window,
     20 August returns 120 records where the open list showed 92.
+
+    Raises `Truncated` if the pages run out before the rows do. The alternative is what this
+    used to do: return the first `max_pages` pages and let the caller believe that was the
+    window.
     """
     session = session or Session()
     criteria = {}
@@ -147,17 +169,28 @@ def targets_from(date_from, date_to, procedure=TENDERS, kind="tender",
         criteria["procedure"] = procedure
 
     out, seen = [], set()
+    # THE LOOP HAS THREE ENDINGS AND ONLY TWO OF THEM ARE HONEST. The portal running out of
+    # rows and the pager repeating itself both mean the window is fully answered. Reaching
+    # the last page does not, and it used to be spelled the same way: the loop simply ended.
+    complete = False
     for number in range(1, max_pages + 1):
         rows = parse_rows(session.page(criteria, number), kind)
         fresh = [r for r in rows if r["pid"] not in seen]
-        if not rows:
+        if not rows:                      # the portal has no more to give
+            complete = True
             break
         for row in fresh:
             seen.add(row["pid"])
             out.append(row)
         if not fresh:                     # the pager ran past the end and repeated itself
+            complete = True
             break
         time.sleep(0.15)
+    if not complete:
+        raise Truncated(
+            "EPPS was still serving new rows after %d pages (%d records). This window is "
+            "wider than one pass can answer: ask for it a day at a time, or raise "
+            "max_pages." % (max_pages, len(out)))
     return out
 
 
