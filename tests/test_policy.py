@@ -29,7 +29,7 @@ class DownloadFilter(unittest.TestCase):
     The policy under test is a FIXTURE, not a deployment's. What is being proved is the
     mechanism — which way each signal fails, and which rule wins when two disagree — and
     that is independent of anybody's terms. Committing real terms here would publish the
-    policy that `EIS_POLICY` exists to keep out of the repository.
+    policy that `LT_POLICY` exists to keep out of the repository.
     """
 
     FIXTURE = json.dumps({
@@ -177,6 +177,54 @@ class OverriddenCodes(unittest.TestCase):
         self.assertEqual(rules[3], ())      # override_prefixes
         self.assertEqual(rules[4], ())      # recall_cpv_prefixes
 
+
+
+class TheNameThePolicyArrivesUnder(unittest.TestCase):
+    """The rename must not be able to fail open.
+
+    This tool was split out of the Latvian repository, where the variable was `EIS_POLICY`.
+    An environment still carrying only the old name loads no policy, and no policy means
+    fetch everything -- a whole day drawn from a state portal, reported as success. So the
+    old name is an error rather than a silence.
+    """
+
+    def setUp(self):
+        self.saved = {k: os.environ.get(k)
+                      for k in (policy.POLICY_ENV, policy.FORMER_POLICY_ENV)}
+        for k in self.saved:
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_the_old_name_alone_stops_the_run(self):
+        os.environ[policy.FORMER_POLICY_ENV] = DownloadFilter.FIXTURE
+        with self.assertRaises(EnvironmentError) as caught:
+            policy.load_policy()
+        said = str(caught.exception)
+        self.assertIn(policy.FORMER_POLICY_ENV, said)
+        self.assertIn(policy.POLICY_ENV, said, "the message must name what to rename it to")
+
+    def test_the_new_name_is_read(self):
+        os.environ[policy.POLICY_ENV] = DownloadFilter.FIXTURE
+        self.assertIsNotNone(policy.load_policy())
+
+    def test_the_new_name_wins_when_both_are_set(self):
+        os.environ[policy.POLICY_ENV] = DownloadFilter.FIXTURE
+        os.environ[policy.FORMER_POLICY_ENV] = "{}"
+        self.assertIsNotNone(policy.load_policy(),
+                             "a leftover old name must not shadow the real one")
+
+    def test_an_explicit_source_is_never_second_guessed(self):
+        os.environ[policy.FORMER_POLICY_ENV] = "{}"
+        self.assertIsNotNone(policy.load_policy(DownloadFilter.FIXTURE))
+
+    def test_neither_name_still_means_no_filter(self):
+        self.assertIsNone(policy.load_policy())
 
 if __name__ == "__main__":
     unittest.main()

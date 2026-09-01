@@ -260,7 +260,7 @@ def main(argv=None):
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--only", choices=("tender", "consultation"), default=None)
     ap.add_argument("--policy", default=None,
-                    help="recall policy: JSON, a path to one, or EIS_POLICY from "
+                    help="recall policy: JSON, a path to one, or LT_POLICY from "
                          "the environment. Absent means fetch everything.")
     args = ap.parse_args(argv)
     day, changes = run(args.date, args.out, args.limit,

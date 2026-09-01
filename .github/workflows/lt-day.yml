@@ -127,10 +127,19 @@ jobs:
           printf '%s' "$LT_POLICY" > policy.json
           echo "policy: from the repository secret"
           python3 -c "
-          import sys, policy
+          import json, sys, policy
           rules = policy.load_policy('policy.json')
           if rules is None:
-              sys.exit('the recall policy did not parse — refusing to fetch the whole day ungated')
+              # WHICH OF THE TWO, because they are different mistakes wearing one
+              # symptom. A policy that does not parse arrived broken; a policy that
+              # parses and carries no rule arrived empty, truncated, or renamed
+              # around. Both fetch the whole day ungated, and the person fixing it
+              # at 04:00 should not have to guess which happened.
+              try:
+                  json.load(open('policy.json', encoding='utf-8'))
+              except ValueError as bad:
+                  sys.exit('the recall policy did not parse (%s) — refusing to fetch the whole day ungated' % bad)
+              sys.exit('the recall policy parsed but carries no rule — refusing to fetch the whole day ungated')
           # READ BY POSITION, NEVER UNPACKED. This line used to be a four-way unpack, and on
           # 28 Aug 2026 load_policy grew a fifth field — the recall codes. Two nights died
           # here with ValueError before anybody looked, because the step that exists to
@@ -145,7 +154,7 @@ jobs:
 
       - name: Fetch the day
         env:
-          EIS_POLICY: policy.json
+          LT_POLICY: policy.json
           EIS_COUNTRY: LT
           LIMIT: ${{ inputs.limit }}
           TARGETS: ${{ inputs.targets }}
