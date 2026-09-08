@@ -719,10 +719,19 @@ def unpack(path, dest, kind, budget):
     # is a +dfsg repack with the same decoder stripped -- so neither `7z` nor `7zz` opens
     # one. unar carries its own free implementation and reads RAR5 as well as RAR4.
     if kind == ".rar":
-        lister, extractor = shutil.which("lsar"), shutil.which("unar")
-        if lister and extractor:
-            return _unpack_rar_cli(lister, extractor, path, dest, budget)
-        raise ValueError("RAR needs unar and lsar, and neither is on PATH")
+        lister = shutil.which("lsar")
+        extractors = [b for b in (shutil.which("bsdtar"), shutil.which("unar")) if b]
+        # TWO EXTRACTORS, AND THE ORDER IS EVIDENCE RATHER THAN TASTE. Ubuntu ships unar
+        # as `1.10.7+ds1+really1.10.1` -- 1.10.1 under a newer version string -- and its
+        # RAR5 extraction is incomplete: measured on three live Lithuanian archives it
+        # read the RAR4 one and failed both others with `tried to read more data than was
+        # available`. libarchive 3.7 carries a complete RAR5 reader, so bsdtar goes first
+        # and unar stays as the second opinion. Listing is unaffected -- lsar read all
+        # three, which is how we know the limit is in the extraction and not the format.
+        if lister and extractors:
+            return _unpack_rar_cli(lister, extractors, path, dest, budget)
+        raise ValueError("RAR needs lsar and one of bsdtar or unar, and they are not "
+                         "both on PATH")
     binary = shutil.which("7z") or shutil.which("7za")
     if binary:
         return _unpack_7z_cli(binary, path, dest, budget)
@@ -745,7 +754,7 @@ def unpack(path, dest, kind, budget):
         z.extractall(dest)
 
 
-def _unpack_rar_cli(lister, extractor, path, dest, budget):
+def _unpack_rar_cli(lister, extractors, path, dest, budget):
     """Same traversal and budget rules as the 7z path, enforced from `lsar -j` output.
 
     lsar reports names and sizes as JSON, so the expansion budget is checked against the
@@ -783,13 +792,27 @@ def _unpack_rar_cli(lister, extractor, path, dest, budget):
     budget[0] -= total
     if budget[0] < 0:
         raise ValueError("archive expands to %s bytes, past the limit" % f"{total:,}")
-    proc = subprocess.run([extractor, "-quiet", "-force-overwrite", "-no-directory",
-                           "-output-directory", os.path.abspath(dest),
-                           "--", os.path.abspath(path)],
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
-    if proc.returncode != 0:
-        raise ValueError("unar extraction failed: %s"
-                         % proc.stdout.decode("utf-8", "replace")[-160:])
+    # Each extractor gets the same emptied destination and the same archive; the first
+    # that succeeds wins, and the archive is only unreadable when every one has refused.
+    reasons = []
+    for extractor in extractors:
+        name = os.path.basename(extractor)
+        if name == "bsdtar":
+            argv = [extractor, "-x", "-f", os.path.abspath(path),
+                    "-C", os.path.abspath(dest)]
+        else:
+            argv = [extractor, "-quiet", "-force-overwrite", "-no-directory",
+                    "-output-directory", os.path.abspath(dest),
+                    "--", os.path.abspath(path)]
+        proc = subprocess.run(argv, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=1800)
+        if proc.returncode == 0:
+            return
+        # THE HEAD OF THE MESSAGE, NOT THE TAIL. A tail reads `...ta than was available)`
+        # and sends the reader to the archive; the head names the file and the format.
+        reasons.append("%s: %s" % (name, proc.stdout.decode("utf-8", "replace")[:300]))
+    raise ValueError("no RAR extractor could open this archive -- %s"
+                     % " | ".join(reasons))
 
 
 def _unpack_7z_cli(binary, path, dest, budget):
