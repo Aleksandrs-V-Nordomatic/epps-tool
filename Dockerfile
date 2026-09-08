@@ -23,12 +23,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # curl is kept for parity with the other country tools' transport, git is for
 # actions/checkout, ca-certificates
 # so TLS works at all. LibreOffice reads legacy Office formats; p7zip opens the .7z a buyer
-# ships a building project in; tesseract with `lav` reads the scans no decoder can.
+# ships a building project in, and unar opens the .rar it ships the other half in --
+# Debian moved p7zip's RAR codec to non-free and then dropped it, and the `7zip` package
+# is a +dfsg repack with the same decoder stripped, so neither reads one and a whole
+# technical design arrives as nothing; tesseract with `lav` reads the scans no decoder
+# can.
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       ca-certificates curl git \
       python3 python3-pip python3-venv \
-      p7zip-full \
+      p7zip-full unar \
       libreoffice-writer libreoffice-calc libreoffice-impress \
       tesseract-ocr tesseract-ocr-lav tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/*
@@ -47,6 +51,8 @@ RUN set -e; \
     git --version > /dev/null; \
     soffice --version > /dev/null; \
     7z i > /dev/null; \
+    command -v lsar > /dev/null; \
+    command -v unar > /dev/null; \
     tesseract --list-langs 2>&1 | grep -q '^lav$'; \
     python3 -c "import fitz, docx, openpyxl, pptx, py7zr; print('converters import')"
 
