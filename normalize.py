@@ -35,9 +35,9 @@ structure, so reading it is exact and free.
 WHY PDF IMAGES ARE OFF BY DEFAULT. A text extract cannot use a raster, and extracting them
 adds a great many megabytes and not one character. `--with-images` restores them.
 
-ARCHIVES ARE UNPACKED, WITH LIMITS. Buyers ship the specification inside a ZIP or a 7z, and
-those nest — an archive holding an archive holding the project. Treating one as opaque
-leaves a tender looking documented and unread at once, the worst state because it is
+ARCHIVES ARE UNPACKED, WITH LIMITS. Buyers ship the specification inside a ZIP, a 7z or a
+RAR, and those nest — an archive holding an archive holding the project. Treating one as
+opaque leaves a tender looking documented and unread at once, the worst state because it is
 invisible. Depth, file count and expanded size are capped so a bomb fails loudly instead of
 filling the runner.
 """
@@ -77,7 +77,7 @@ MIN_USEFUL_CHARS = 1
 
 TEXTUAL = {".txt": "text", ".csv": "csv", ".tsv": "tsv", ".xml": "xml",
            ".json": "json", ".md": "markdown"}
-ARCHIVES = {".zip", ".7z"}
+ARCHIVES = {".zip", ".7z", ".rar"}
 
 
 def slug(name, limit=80):
@@ -111,6 +111,11 @@ def sniff(path):
         return ".ifc"
     if head[:2] == b"7z" or head[:6] == b"7z\xbc\xaf\x27\x1c":
         return ".7z"
+    # RAR 1.5-4.x signs \x00 and RAR 5 signs \x01\x00; six bytes cover both. Buyers
+    # send these for a whole technical design, and without this the file is not an archive
+    # to this tool at all -- it lands in the gap list and the project inside is never read.
+    if head[:6] == b"Rar!\x1a\x07":
+        return ".rar"
     if head[:4] == b"PK\x03\x04":
         try:
             with zipfile.ZipFile(path) as z:
@@ -709,6 +714,15 @@ def unpack(path, dest, kind, budget):
                 with z.open(m) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst)
         return
+    # RAR IS NOT A 7-ZIP FORMAT HERE, whatever the file manager on a desktop suggests.
+    # Debian moved p7zip's RAR codec to non-free and then dropped it, and Ubuntu's `7zip`
+    # is a +dfsg repack with the same decoder stripped -- so neither `7z` nor `7zz` opens
+    # one. unar carries its own free implementation and reads RAR5 as well as RAR4.
+    if kind == ".rar":
+        lister, extractor = shutil.which("lsar"), shutil.which("unar")
+        if lister and extractor:
+            return _unpack_rar_cli(lister, extractor, path, dest, budget)
+        raise ValueError("RAR needs unar and lsar, and neither is on PATH")
     binary = shutil.which("7z") or shutil.which("7za")
     if binary:
         return _unpack_7z_cli(binary, path, dest, budget)
@@ -729,6 +743,53 @@ def unpack(path, dest, kind, budget):
         if budget[0] < 0:
             raise ValueError("archive expands to %s bytes, past the limit" % f"{total:,}")
         z.extractall(dest)
+
+
+def _unpack_rar_cli(lister, extractor, path, dest, budget):
+    """Same traversal and budget rules as the 7z path, enforced from `lsar -j` output.
+
+    lsar reports names and sizes as JSON, so the expansion budget is checked against the
+    archive's own declared sizes before a byte is written -- the same order the other two
+    paths use, and the reason a bomb fails loudly here too."""
+    import json as jsonlib
+    import subprocess
+    proc = subprocess.run([lister, "-j", "--", os.path.abspath(path)],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+    if proc.returncode != 0:
+        raise ValueError("lsar could not list the archive: %s"
+                         % proc.stderr.decode("utf-8", "replace")[-160:])
+    try:
+        listing = jsonlib.loads(proc.stdout.decode("utf-8", "replace"))
+    except ValueError:
+        raise ValueError("lsar did not return JSON for this archive")
+    names, total = [], 0
+    for entry in listing.get("lsarContents") or []:
+        if entry.get("XADIsDirectory"):
+            continue
+        names.append(entry.get("XADFileName") or "")
+        try:
+            total += int(entry.get("XADFileSize") or 0)
+        except (TypeError, ValueError):
+            pass
+    # Same refusal as the 7z path: nothing listed means the format was not read.
+    if not names:
+        raise ValueError("lsar listed no members: it cannot read this archive")
+    if len(names) > MAX_MEMBERS:
+        raise ValueError("archive holds %d members, limit %d" % (len(names), MAX_MEMBERS))
+    for name in names:
+        clean = name.replace(chr(92), "/")
+        if clean.startswith("/") or ".." in clean.split("/") or os.path.isabs(clean):
+            raise ValueError("unsafe path in archive: %r" % name)
+    budget[0] -= total
+    if budget[0] < 0:
+        raise ValueError("archive expands to %s bytes, past the limit" % f"{total:,}")
+    proc = subprocess.run([extractor, "-quiet", "-force-overwrite", "-no-directory",
+                           "-output-directory", os.path.abspath(dest),
+                           "--", os.path.abspath(path)],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
+    if proc.returncode != 0:
+        raise ValueError("unar extraction failed: %s"
+                         % proc.stdout.decode("utf-8", "replace")[-160:])
 
 
 def _unpack_7z_cli(binary, path, dest, budget):
@@ -757,6 +818,12 @@ def _unpack_7z_cli(binary, path, dest, budget):
                 except ValueError:
                     pass
             current = {}
+    # A LISTING WITH NO MEMBERS IS NOT AN EMPTY ARCHIVE. It is a format this binary cannot
+    # read, which is what p7zip does with a .rar. Extracting that leaves an empty directory
+    # and a tender that looks read -- the one state this file exists to prevent.
+    if not names:
+        raise ValueError("%s listed no members: it cannot read this archive"
+                         % os.path.basename(binary))
     if len(names) > MAX_MEMBERS:
         raise ValueError("archive holds %d members, limit %d" % (len(names), MAX_MEMBERS))
     for name in names:
