@@ -268,6 +268,11 @@ class TheListItselfIsReadForgivingly(unittest.TestCase):
     def test_the_same_procurement_named_twice_is_fetched_once(self):
         self.assertEqual(eis_tool.read_targets("EPPS:5\n5\n 5 "), ["5"])
 
+    def test_a_plan_card_key_is_skipped_not_split_into_ids(self):
+        """A plan card's key has words and spaces; split, it would become ids no view serves."""
+        self.assertEqual(eis_tool.read_targets("EPPS:7\nPLAN:12|šildymo sistemos|45331210 2026"),
+                         ["7"])
+
     def test_an_empty_list_is_empty_and_not_a_list_holding_nothing(self):
         self.assertEqual(eis_tool.read_targets(""), [])
         self.assertEqual(eis_tool.read_targets(None), [])

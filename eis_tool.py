@@ -98,10 +98,25 @@ def read_targets(source):
         with open(source, encoding="utf-8") as fh:
             raw = fh.read()
     out, seen = [], set()
-    for token in re.split(r"[\s,]+", raw.strip()):
+    # A plan card's key is a whole line — `PLAN:<buyer>|<title>|<cpv>` — and its title can hold
+    # a bare number, so it is dropped as a line before anything is split.
+    kept = []
+    for row in raw.splitlines():
+        if row.strip().upper().startswith("PLAN:"):
+            print("targets: a plan card's key is not a procurement, skipped", file=sys.stderr)
+            continue
+        kept.append(row)
+    for token in re.split(r"[\s,]+", "\n".join(kept).strip()):
         # `EPPS:9320336` is how the board spells a key; the id is what the portal answers to.
-        token = token.split(":")[-1].strip()
-        if token and token not in seen:
+        # Anything else is refused by name rather than fetched: a stray word would become an
+        # id no view serves, reported as a hole in the watch.
+        found = re.fullmatch(r"(?:EPPS:)?(\d+)", token.strip(), re.I)
+        if not found:
+            if token.strip():
+                print("targets: %r is not an EPPS id, skipped" % token, file=sys.stderr)
+            continue
+        token = found.group(1)
+        if token not in seen:
             seen.add(token)
             out.append(token)
     return out
