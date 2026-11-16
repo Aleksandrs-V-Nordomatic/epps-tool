@@ -256,6 +256,59 @@ def deliver(out_root, date, run_id, drive, base, tok):
             "sent": sent, "carried": carried, "tenders": len(records)}
 
 
+# THE PLANS HAVE A MEMORY TOO, AND IT LIVES WHERE THE DAY'S DOES. A plan line is new once,
+# on the night it first appears, and only the drive can say which night that was: the
+# runner that harvests tonight has never seen last night. So the harvest is bracketed by two
+# trips to the drive — the last harvest's index and lines are fetched back before it, and
+# tonight's are delivered after it — exactly as a tender home is compared against the drive.
+PLAN_FILES = ("index.json", "lines.jsonl")
+
+
+def plans_prior(out_root, drive, base, tok, fetch=None):
+    """The last harvest's index and lines, off the drive and onto this disk.
+
+    Nothing there is the first night, and the harvest then reads every plan and calls every
+    line new, which `changes/<date>.json` says outright with `first_harvest`.
+    """
+    fetch = fetch or graph.bytes_at
+    local = os.path.join(out_root, "plans")
+    os.makedirs(local, exist_ok=True)
+    found = 0
+    for name in PLAN_FILES:
+        data = fetch(drive, "%s/plans/%s" % (base, name), tok)
+        path = os.path.join(local, name)
+        if data:
+            with open(path, "wb") as fh:
+                fh.write(data)
+            found += 1
+        elif os.path.exists(path):
+            # A local copy the drive does not have would be a memory the reader cannot see.
+            os.remove(path)
+    return found
+
+
+def deliver_plans(out_root, date, drive, base, tok, upload=None):
+    """Tonight's plan changes, the whole kept set, and the index — in that order.
+
+    `index.json` is LAST because it carries `seen`, which tells tomorrow which plans it may
+    skip. An index that landed before the lines it vouches for would let tomorrow skip a
+    buyer whose lines never arrived.
+    """
+    upload = upload or graph.upload_file
+    local = os.path.join(out_root, "plans")
+    order = [("changes/%s.json" % date, os.path.join(local, "changes", "%s.json" % date)),
+             ("lines.jsonl", os.path.join(local, "lines.jsonl")),
+             ("index.json", os.path.join(local, "index.json"))]
+    files = size = 0
+    for rel, path in order:
+        if not os.path.exists(path):
+            raise SystemExit("deliver_lt --plans: the harvest left no %s" % rel)
+        upload(drive, "%s/plans/%s" % (base, rel), path, tok)
+        files += 1
+        size += os.path.getsize(path)
+    return {"files": files, "bytes": size}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Deliver a Lithuanian day to a Graph drive.")
     ap.add_argument("--out", default="work",
@@ -270,6 +323,10 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true",
                     help="prove the credentials reach the destination, deliver nothing, "
                          "and say so in counts rather than paths")
+    ap.add_argument("--plans-prior", action="store_true",
+                    help="fetch the last plan harvest back from the drive, before harvesting")
+    ap.add_argument("--plans", action="store_true",
+                    help="deliver tonight's plan harvest instead of a day")
     ap.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""),
                     help="the workflow run this delivery came from")
     country.add_argument(ap)
@@ -319,11 +376,23 @@ def main(argv=None):
               % (code, (item.get("folder") or {}).get("childCount", 0)))
         return 0
 
+    out_root = os.path.join(args.out, code)
+    if args.plans_prior:
+        found = plans_prior(out_root, drive, base, graph.graph_token())
+        print("plans: %d of %d file(s) of the last harvest found on the drive"
+              % (found, len(PLAN_FILES)))
+        return 0
+
     if not args.date:
-        ap.error("--date is required unless --check is given")
+        ap.error("--date is required unless --check or --plans-prior is given")
     tok = graph.graph_token()
 
-    out_root = os.path.join(args.out, code)
+    if args.plans:
+        result = deliver_plans(out_root, args.date, drive, base, tok)
+        print("delivered %s plans for %s: %d SharePoint files, %.1f MB"
+              % (code, args.date, result["files"], result["bytes"] / 1e6))
+        return 0
+
     result = deliver(out_root, args.date, args.run_id or None, drive, base, tok)
 
     print("delivered %s for %s: %d procurement(s), %d SharePoint files, %.1f MB"

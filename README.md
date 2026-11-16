@@ -90,8 +90,14 @@ this note carries the correction.
 
 ```
 work/LT/  <date>/{day.json,changes.json}   tenders/<pid>/…
-          plans/{index.json,lines.jsonl}   doors/{index.json,doors.jsonl}
+          plans/{index.json,lines.jsonl,changes/<date>.json}   doors/{index.json,doors.jsonl}
 ```
+
+The plans ride the same night as the day, after it. `lines.jsonl` is every plan line the recall
+policy keeps, each with `first_seen` and `last_changed`; `changes/<date>.json` is what moved in
+the plans that night: lines new, changed (with the fields and their old values) and removed. The
+last harvest is fetched back from the drive before the next one, so "new" means new since the
+night before and not new to this runner.
 
 **`GRAPH_DEST_ROOT` names the folder that CONTAINS the country folders, not one of them.** The
 code is appended by the tool. Configuring the full path instead would put the country in two

@@ -27,7 +27,6 @@ is a tool that cannot say when it was pointed at the wrong drive. See country.py
 
 import argparse
 import country
-import json
 import os
 import re
 import sys
@@ -148,6 +147,9 @@ def main(argv=None):
         p.add_argument("--out", default="work")
         p.add_argument("--policy", default=None)
         p.add_argument("--limit", type=int, default=None)
+        if name == "plans":
+            p.add_argument("--date", default=None,
+                           help="the night the harvest is filed under, YYYY-MM-DD")
         country.add_argument(p)
 
     args = ap.parse_args(argv)
@@ -164,15 +166,19 @@ def main(argv=None):
         out = os.path.join(args.out, code)
         if args.command == "plans":
             import lt_plans
-            prior = os.path.join(out, "plans", "index.json")
-            seen = {}
-            if os.path.exists(prior):
-                with open(prior, encoding="utf-8") as fh:
-                    seen = json.load(fh).get("seen") or {}
-            index, _ = lt_plans.harvest(out, args.policy, args.limit, seen)
+            index, _, moved = lt_plans.harvest_local(out, args.policy, args.limit, args.date)
             print("plans: %d published, %d read, %d unchanged, %d line(s), %d gated"
                   % (index["published_plans"], index["buyers_read"],
                      index["buyers_unchanged"], index["lines_kept"], index["lines_gated"]))
+            print("since the last harvest: %(new)d new, %(changed)d changed, "
+                  "%(removed)d removed" % moved["counts"])
+            # Short is said, never passed off as whole, and it is exit 1 for the same reason
+            # a short day is: the caller delivers it anyway and says so.
+            if not index["complete"] and not args.limit:
+                print("plans: SHORT — %d plan(s) unread, %d of %s walked"
+                      % (len(index["failed"]), index["published_plans"],
+                         index["register_total"]), file=sys.stderr)
+                return 1
         else:
             import lt_doors
             index, _ = lt_doors.harvest(out, args.policy, limit=args.limit)

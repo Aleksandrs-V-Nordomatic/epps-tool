@@ -109,6 +109,20 @@ class TheLineAReaderGets(unittest.TestCase):
         self.assertIsNone(line["cpv_main"])
         self.assertEqual(line["cpv"], [])
 
+    def test_the_planned_invitation_arrives_as_a_date_not_a_serial_number(self):
+        """The template types its date columns as dates; read raw, 46121.0 is not a day."""
+        import io
+        book = xlwt.Workbook()
+        sheet = book.add_sheet("DUOMENYS")
+        sheet.write(0, 0, "Pirkimo pavadinimas")
+        sheet.write(0, 1, "Kvietimo teikti pasiūlymus data")
+        sheet.write(1, 0, "Alfa")
+        sheet.write(1, 1, 46121.0, xlwt.easyxf(num_format_str="YYYY-MM-DD"))
+        buffer = io.BytesIO()
+        book.save(buffer)
+        head, rows = lt_plans.rows(buffer.getvalue())
+        self.assertEqual(lt_plans.as_line(rows[0], head, "A", "1")["invites"], "2026-04-09")
+
     def test_the_gate_can_read_the_line_as_it_reads_a_notice(self):
         """`policy.cpv_codes` looks under `cpv`, so a plan line gates like a tender."""
         import policy

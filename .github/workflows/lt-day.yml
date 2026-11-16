@@ -204,3 +204,42 @@ jobs:
           EIS_COUNTRY: LT
         run: |
           python3 deliver_lt.py --out work --date "$DAY"
+
+      # THE BUYERS' ANNUAL PLANS, AFTER THE DAY AND NEVER INSTEAD OF IT. A plan line is an
+      # intention months ahead of a notice, so nothing about tonight's day waits on it, and
+      # the day is already on the drive before this step starts.
+      #
+      # NIGHTLY, BECAUSE IT COSTS A MINUTE. Measured 16 Nov 2026: the register is 1,442
+      # plans over 145 pages and walks in about 22 seconds; 10 to 30 buyers resubmit on a
+      # working day, and only those are downloaded. The whole register read cold — the first
+      # night, or a night after the policy changed — is about 13 minutes. A weekly step would
+      # save under a minute a night and hand sales the line up to six days later.
+      #
+      # The last harvest comes back from the drive first, for the same reason the day is
+      # compared against the drive: the runner has never seen last night, and without it
+      # every line would be new every night. A plan failure must not turn the day's run red
+      # after the day is delivered, so it is a warning here and `plans/index.json` on the
+      # drive says `complete: false` with every unread plan named.
+      - name: Harvest the annual plans and deliver what moved in them
+        if: ${{ success() && env.HAVE_GRAPH == 'true' && inputs.limit == '' }}
+        continue-on-error: true
+        env:
+          HAVE_GRAPH: ${{ secrets.GRAPH_DRIVE_ID != '' }}
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          GRAPH_DRIVE_ID: ${{ secrets.GRAPH_DRIVE_ID }}
+          GRAPH_DEST_ROOT: ${{ secrets.GRAPH_DEST_ROOT }}
+          EIS_COUNTRY: LT
+        run: |
+          python3 deliver_lt.py --out work --plans-prior
+          rc=0
+          python3 eis_tool.py plans --out work --policy policy.json --date "$DAY" || rc=$?
+          # Short is delivered like a short day: the unread plans keep last night's lines
+          # and are tried again tomorrow, and the index names them.
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning::the plan harvest is short — plans/index.json names what was not read"
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          python3 deliver_lt.py --out work --plans --date "$DAY"
