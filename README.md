@@ -4,8 +4,9 @@ Downloads every public document of a Lithuanian EPPS procurement and turns it in
 Deterministically, with no model in the main path, and with every file it could not read
 named rather than quietly missing.
 
-**Proprietary. No licence is granted — see [LICENSE](LICENSE).** Issues and pull requests
-are closed and unreviewed.
+**Proprietary. All rights reserved; no licence is granted and no use is permitted — see
+[LICENSE](LICENSE).** This includes copying, running, modifying and AI training. Contributions
+are not accepted.
 
 Nothing here decides which procurements matter. The tool fetches what it is pointed at,
 extracts it, and says what it could not read; the interest, the destination and the
